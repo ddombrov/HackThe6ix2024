@@ -14,7 +14,7 @@ def text_to_speech(input_text, voice_id, eleven_labs_api_key, stability, similar
 
         data = {
             "text": input_text,
-            "model_id": "eleven_monolingual_v1",
+            "model_id": "eleven_multilingual_v2",
             "voice_settings": {
                 "stability": stability,
                 "similarity_boost": similarity

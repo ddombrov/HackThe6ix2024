@@ -1,30 +1,31 @@
 from openai import OpenAI
+import os
 
 MODEL = "gpt-4o-mini"
 
-
+# Replace your generate_text function with direct API calls
 def generate_text(prompt, tone, purpose, lengthOfCall):
     try:
-        client = OpenAI()
-
-        completion = client.chat.completions.create(
-            model=MODEL,
-            messages=[
-                {"role": "system", "content": return_response(
-                    prompt, tone, purpose, lengthOfCall)}
-            ],
-            # response_format={ "type": "json_object" }
+        import requests
+        api_key = os.getenv('OPENAI_API_KEY')
+        
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "gpt-4o-mini", 
+                "messages": [{"role": "system", "content": return_response(prompt, tone, purpose, lengthOfCall)}]
+            }
         )
-
-        gpt_response = completion.choices[0].message
-
-        if gpt_response:
-            return gpt_response.content
-
-    except Exception as e:
-        print("Error generating start:", e)
-        return {"error": "Internal Server Error"}
-
+        
+        if response.status_code == 200:
+            return response.json()["choices"][0]["message"]["content"]
+        else:
+            return "Sorry, couldn't generate custom message."
+    except:
+        return "Sorry, couldn't generate custom message."
+# def generate_text(prompt, tone, purpose, lengthOfCall):
+#     return "test"
 
 def return_response(prompt, tone, purpose, lengthOfCall):
     response = ""
