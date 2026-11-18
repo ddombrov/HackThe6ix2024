@@ -1,0 +1,13 @@
+name = "ai-voice-caller"
+pages_build_output_dir = "out"
+compatibility_date = "2025-01-01"
+
+# Calls placed per day and per week, so the site-wide limits in start-call.ts hold.
+[[kv_namespaces]]
+binding = "CALL_USAGE"
+id = "f1fe5ccf85ab4e6fbc87b6cad2085a9c"
+
+# The generated call audio that Twilio plays. The bucket deletes files after one day.
+[[r2_buckets]]
+binding = "CALL_AUDIO"
+bucket_name = "hackthe6ix-call-audio"
