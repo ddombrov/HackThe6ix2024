@@ -28,7 +28,7 @@ export default function VoiceCard({
     <div style={floatingStyle}>
       <div
         style={{
-          width: 300,
+          width: 270,
           height: 250,
           backgroundColor: "rgba(246, 246, 246, 0.4)",
           borderRadius: 8,

@@ -140,9 +140,9 @@ export default function CallMeMaybePage() {
 
       <AuroraBackground className="h-fit">
         <div className="flex flex-col w-full items-center justify-center overflow-hidden">
-          <div className="overflow-hidden p-5 rounded-md w-full flex items-center justify-center flex-col gap-20">
+          <div className="overflow-hidden p-5 rounded-md w-full flex items-center justify-center flex-col gap-10">
             <div className="w-full flex flex-col items-center justify-center gap-2">
-              <label className="text-6xl md:text-8xl font-sans font-semibold mt-20 text-center" style={{ color: "rgb(43, 77, 189)" }}>
+              <label className="text-6xl md:text-8xl font-sans font-semibold mt-10 text-center" style={{ color: "rgb(43, 77, 189)" }}>
                 Call Me Maybe
               </label>
               <label className="text-lg font-medium my-3 text-center">
