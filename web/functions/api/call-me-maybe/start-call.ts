@@ -1,4 +1,5 @@
 /// <reference types="@cloudflare/workers-types" />
+import { reportAiFailure } from "../_alerts";
 
 // Cloudflare Pages Function backing the /call-me-maybe page. Generates a
 // message with OpenAI, turns it into speech with ElevenLabs, stores the mp3
@@ -10,6 +11,7 @@
 //     TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER: secrets
 //   - CALL_AUDIO: an R2 bucket binding, holds the generated mp3s
 //   - CALL_USAGE: a KV namespace binding, tracks daily/weekly call counts
+//   - ALERTS_TOKEN: secret, lets this function report AI failures to the alerts Worker
 interface Env {
   OPENAI_API_KEY: string;
   ELEVEN_LABS_API_KEY: string;
@@ -18,9 +20,13 @@ interface Env {
   TWILIO_PHONE_NUMBER: string;
   CALL_AUDIO: R2Bucket;
   CALL_USAGE: KVNamespace;
+  ALERTS_TOKEN?: string;
 }
 
-const OPENAI_MODEL = "gpt-4o-mini";
+// The models to try, cheapest first. A model that fails (retired, or an outage) is skipped for the next one, and the
+// failure is emailed through the alerts Worker.
+const OPENAI_MODELS = ["gpt-6-luna", "gpt-5.6-luna"];
+const SPEECH_MODEL = "eleven_multilingual_v2";
 
 // Real outbound phone calls, triggered by anonymous site visitors, targeting
 // any number they type in - capped much tighter than the chat widget's
@@ -108,25 +114,31 @@ function buildPrompt(prompt: string, tone: Tone, purpose: string, lengthOfCall: 
         `;
 }
 
-async function generateCallText(env: Env, prompt: string, tone: Tone, purpose: string, lengthOfCall: CallLength) {
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: OPENAI_MODEL,
-      messages: [{ role: "system", content: buildPrompt(prompt, tone, purpose, lengthOfCall) }],
-    }),
-  });
-
-  if (!res.ok) return null;
-  const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-  return data.choices?.[0]?.message?.content ?? null;
+async function generateCallText(env: Env, report: (p: Promise<void>) => void, prompt: string, tone: Tone, purpose: string, lengthOfCall: CallLength) {
+  for (let i = 0; i < OPENAI_MODELS.length; i++) {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: OPENAI_MODELS[i],
+        messages: [{ role: "system", content: buildPrompt(prompt, tone, purpose, lengthOfCall) }],
+      }),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+      return data.choices?.[0]?.message?.content ?? null;
+    }
+    const detail = await res.text();
+    console.error("OpenAI upstream error", OPENAI_MODELS[i], res.status, detail);
+    report(reportAiFailure(env.ALERTS_TOKEN, "AI Voice Caller", OPENAI_MODELS[i], OPENAI_MODELS[i + 1] ?? "", `${res.status} ${detail}`));
+  }
+  return null;
 }
 
-async function textToSpeech(env: Env, text: string, voiceId: string, stability: number, similarity: number) {
+async function textToSpeech(env: Env, report: (p: Promise<void>) => void, text: string, voiceId: string, stability: number, similarity: number) {
   const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
     method: "POST",
     headers: {
@@ -136,7 +148,7 @@ async function textToSpeech(env: Env, text: string, voiceId: string, stability: 
     },
     body: JSON.stringify({
       text,
-      model_id: "eleven_multilingual_v2",
+      model_id: SPEECH_MODEL,
       voice_settings: { stability, similarity_boost: similarity },
     }),
   });
@@ -144,12 +156,13 @@ async function textToSpeech(env: Env, text: string, voiceId: string, stability: 
   if (!res.ok) {
     const detail = await res.text();
     console.error("ElevenLabs upstream error", res.status, detail);
+    report(reportAiFailure(env.ALERTS_TOKEN, "AI Voice Caller", `ElevenLabs ${SPEECH_MODEL}`, "", `${res.status} ${detail}`));
     return null;
   }
   return res.arrayBuffer();
 }
 
-export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
+export const onRequestPost: PagesFunction<Env> = async ({ request, env, waitUntil }) => {
   let body: Partial<StartCallBody>;
   try {
     body = await request.json();
@@ -191,12 +204,12 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     return json({ error: "This feature is limited to a small number of calls per day/week, and that limit has been reached. Try again later." }, 429);
   }
 
-  const callText = await generateCallText(env, prompt.trim(), tone as Tone, purpose.trim(), lengthOfCall as CallLength);
+  const callText = await generateCallText(env, waitUntil, prompt.trim(), tone as Tone, purpose.trim(), lengthOfCall as CallLength);
   if (!callText || callText.length > 10000) {
     return json({ error: "Couldn't generate a message for that request." }, 502);
   }
 
-  const audioBuffer = await textToSpeech(env, callText, voice, stability, similarity);
+  const audioBuffer = await textToSpeech(env, waitUntil, callText, voice, stability, similarity);
   if (!audioBuffer) {
     return json({ error: "Couldn't generate speech for that message." }, 502);
   }
